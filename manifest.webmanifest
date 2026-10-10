@@ -1,1 +1,1 @@
-{"name":"PocketOS","short_name":"PocketOS","start_url":"./index.html","display":"standalone","background_color":"#101b36","theme_color":"#101b36","orientation":"landscape","icons":[]}
+{"name":"PocketOS","short_name":"PocketOS","start_url":"./","scope":"./","display":"standalone","background_color":"#121b35","theme_color":"#121b35","orientation":"landscape","description":"Offline mini desktop pre iPhone"}
