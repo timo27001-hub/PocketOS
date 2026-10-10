@@ -5,13 +5,13 @@ function launchCorsa3D(){
   const shell=document.getElementById('desktop-shell');
   const overlay=document.createElement('div');
   overlay.id='corsaOverlay';
-  overlay.innerHTML='<canvas id="corsaView"></canvas><div id="corsaHud"><strong id="corsaSpeed">0</strong> km/h<br><span id="corsaLap">Kolo 1 · 0:00.0</span><br><span id="corsaBest">Najlepšie: —</span></div><button id="corsaExit" aria-label="Zavrieť hru">✕ Zavrieť</button><div id="corsaHelp">WASD / šípky · dotykové ovládanie</div><div id="corsaControls"><div class="group"><button id="corsaLeft">◀</button><button id="corsaRight">▶</button></div><div class="group"><button id="corsaBrake">BRZDA</button><button id="corsaGas">PLYN</button></div></div>';
+  overlay.innerHTML='<canvas id="corsaView"></canvas><div id="corsaHud"><strong id="corsaSpeed">0</strong> km/h · <strong id="corsaGear">1</strong><br><span id="corsaLap">Kolo 1 · 0:00.0</span><br><span id="corsaBest">Najlepšie: —</span></div><button id="corsaCamera" aria-label="Zmeniť kameru">📷 Kamera</button><button id="corsaExit" aria-label="Zavrieť hru">✕ Zavrieť</button><div id="corsaHelp">WASD / šípky · dotykové ovládanie</div><div id="corsaControls"><div class="group"><button id="corsaLeft">◀</button><button id="corsaRight">▶</button></div><div class="group"><button id="corsaBrake">BRZDA</button><button id="corsaGas">PLYN</button></div></div>';
   shell.appendChild(overlay);
   const canvas=overlay.querySelector('canvas');
   const gl=canvas.getContext('webgl',{antialias:true,alpha:false,depth:true,powerPreference:'high-performance'});
   const keys={left:false,right:false,gas:false,brake:false};
   const cleanup=[];
-  let live=true,raf=0;
+  let live=true,raf=0,cameraMode=0;
   function close(){
     if(!live)return;live=false;
     cancelAnimationFrame(raf);cleanup.forEach(fn=>fn());
@@ -19,6 +19,7 @@ function launchCorsa3D(){
     if(gameCleanup===close)gameCleanup=null;
   }
   gameCleanup=close;
+  overlay.querySelector('#corsaCamera').addEventListener('click',()=>{cameraMode=(cameraMode+1)%3});
   overlay.querySelector('#corsaExit').addEventListener('click',()=>{close();showGames()});
   const keymap={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'gas',ArrowDown:'brake',a:'left',d:'right',w:'gas',s:'brake',A:'left',D:'right',W:'gas',S:'brake'};
   function kd(e){const k=keymap[e.key];if(k){e.preventDefault();keys[k]=true}}
@@ -139,9 +140,11 @@ function launchCorsa3D(){
     steer+=(wheel-steer)*Math.min(1,dt*8);
     if(!completed){
       const offroad=Math.abs(lateral)>roadWidth/2-1.0;
-      const accel=keys.gas?(offroad?11:23):keys.brake?-43:-9;
-      speed=Math.max(0,Math.min(offroad?70:175,speed+accel*dt));
-      lateral+=steer*(3.2+speed*.055)*dt;
+      const accel=keys.brake?-60:keys.gas?(offroad?10:26):-12;
+      speed=Math.max(0,Math.min(offroad?75:185,speed+accel*dt));
+      lateral+=steer*(2.0+speed*.052)*dt;
+      // Off-track grip loss and drag: arcade handling, not a physical tire simulation.
+      if(offroad)speed=Math.max(0,speed-17*dt);
       lateral=Math.max(-25,Math.min(25,lateral));
       const p=track(t),curvature=Math.hypot(-rx*Math.cos(t*6.283),-rz*Math.sin(t*6.283))/Math.pow(Math.hypot(-rx*Math.sin(t*6.283),rz*Math.cos(t*6.283)),2);
       lateral+=Math.sign(steer||1)*0; // wheel steering controls lateral offset from racing line
@@ -152,15 +155,15 @@ function launchCorsa3D(){
     }
     const p=track(t),px=p.x+p.nx*lateral,pz=p.z+p.nz*lateral;
     const heading=Math.atan2(p.tx,p.tz)-steer*.10;
-    const camera=[px-p.tx*10+p.nx*1.0,5.6,pz-p.tz*10+p.nz*1.0];
-    const target=[px+p.tx*16,1.2,pz+p.tz*16];
+    const camera=cameraMode===0?[px-p.tx*10+p.nx*1.0,5.6,pz-p.tz*10+p.nz*1.0]:cameraMode===1?[px+p.tx*.8,1.65,pz+p.tz*.8]:[px-p.tx*19,11,pz-p.tz*19];
+    const target=cameraMode===2?[px+p.tx*11,1.0,pz+p.tz*11]:[px+p.tx*18,1.5,pz+p.tz*18];
     const ratio=window.devicePixelRatio||1;
     const dw=Math.max(2,Math.round(canvas.clientWidth*Math.min(1.6,ratio))),dh=Math.max(2,Math.round(canvas.clientHeight*Math.min(1.6,ratio)));
     if(canvas.width!==dw||canvas.height!==dh){canvas.width=dw;canvas.height=dh}
     gl.viewport(0,0,canvas.width,canvas.height);
     gl.clearColor(.50,.72,.89,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
     positions=[];colors=[];staticScene();
-    carMesh(px,pz,heading,col.car,1);
+    if(cameraMode!==1)carMesh(px,pz,heading,col.car,1);
     for(let i=0;i<3;i++){
       const rt=(t+.18+i*.23)%1,r=track(rt);
       const lane=i%2?2.5:-2.5;
@@ -173,6 +176,7 @@ function launchCorsa3D(){
     gl.uniformMatrix4fv(uvp,false,mul(perspective(Math.PI/3,canvas.width/canvas.height,.1,650),lookAt(camera,target)));
     gl.drawArrays(gl.TRIANGLES,0,positions.length/3);
     speedEl.textContent=Math.round(speed);
+    overlay.querySelector('#corsaGear').textContent=(speed<35?1:speed<65?2:speed<100?3:speed<145?4:5)+' ⚙';
     lapEl.textContent=completed?'🏁 CIEĽ · 3 kolá':'Kolo '+lap+'/3 · '+Math.floor(lapTime/60)+':'+(lapTime%60).toFixed(1).padStart(4,'0');
     bestEl.textContent='Najlepšie: '+(best===Infinity?'—':best.toFixed(1)+' s');
     raf=requestAnimationFrame(render);
