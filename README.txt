@@ -1,7 +1,1 @@
-PocketOS v0.3 – offline galéria
-
-Nahraj index.html, sw.js, manifest.webmanifest do koreňa GitHub repozitára a potvrď Commit changes. Otvor stránku cez Safari online aspoň raz po aktualizácii, potom vyskúšaj offline.
-
-Nové: Gallery – import viacerých fotiek, trvalejšie lokálne uloženie cez IndexedDB, náhľady, editácia, vymazanie. Photos – uloženie upravenej JPG fotky do galérie.
-
-Upozornenie: iOS môže dáta webovej aplikácie vymazať. Exportuj a zálohuj dôležité fotky. Nie je to skutočný Linux/macOS ani RAW editor.
+PocketOS v0.4: Oprava editora fotiek pre Safari. Jas, kontrast a sýtosť sa teraz počítajú priamo z pixelov; hodnoty sú viditeľné vedľa posuvníkov. Nahraj index.html, sw.js, manifest.webmanifest do GitHub repository, commit, potom obnov web v Safari online. Pri starej cache zavri aplikáciu, otvor stránku v Safari a obnov ju. Offline údaje zálohuj.
