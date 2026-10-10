@@ -5,7 +5,7 @@ function launchCorsa3D(){
   const shell=document.getElementById('desktop-shell');
   const overlay=document.createElement('div');
   overlay.id='corsaOverlay';
-  overlay.innerHTML='<canvas id="corsaView"></canvas><div id="corsaHud"><strong id="corsaSpeed">0</strong> km/h · <strong id="corsaGear">1</strong><br><span id="corsaLap">Kolo 1 · 0:00.0</span><br><span id="corsaBest">Najlepšie: —</span></div><button id="corsaCamera" aria-label="Zmeniť kameru">📷 Kamera</button><button id="corsaExit" aria-label="Zavrieť hru">✕ Zavrieť</button><div id="corsaHelp">WASD / šípky · dotykové ovládanie</div><div id="corsaControls"><div class="group"><button id="corsaLeft">◀</button><button id="corsaRight">▶</button></div><div class="group"><button id="corsaBrake">BRZDA</button><button id="corsaGas">PLYN</button></div></div>';
+  overlay.innerHTML='<canvas id="corsaView"></canvas><div id="corsaHud"><strong id="corsaSpeed">0</strong> km/h · <strong id="corsaGear">1</strong><br><span id="corsaLap">Kolo 1 · 0:00.0</span><br><span id="corsaBest">Najlepšie: —</span></div><button id="corsaReset">↺ Reset</button><button id="corsaCamera" aria-label="Zmeniť kameru">📷 Kamera</button><button id="corsaExit" aria-label="Zavrieť hru">✕ Zavrieť</button><div id="corsaHelp">WASD / šípky · bez autopilota · R = reset</div><div id="corsaControls"><div class="group"><button id="corsaLeft">◀</button><button id="corsaRight">▶</button></div><div class="group"><button id="corsaBrake">BRZDA</button><button id="corsaGas">PLYN</button></div></div>';
   shell.appendChild(overlay);
   const canvas=overlay.querySelector('canvas');
   const gl=canvas.getContext('webgl',{antialias:true,alpha:false,depth:true,powerPreference:'high-performance'});
@@ -22,7 +22,7 @@ function launchCorsa3D(){
   overlay.querySelector('#corsaCamera').addEventListener('click',()=>{cameraMode=(cameraMode+1)%3});
   overlay.querySelector('#corsaExit').addEventListener('click',()=>{close();showGames()});
   const keymap={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'gas',ArrowDown:'brake',a:'left',d:'right',w:'gas',s:'brake',A:'left',D:'right',W:'gas',S:'brake'};
-  function kd(e){const k=keymap[e.key];if(k){e.preventDefault();keys[k]=true}}
+  function kd(e){if(e.key==='r'||e.key==='R'){resetCar();return}const k=keymap[e.key];if(k){e.preventDefault();keys[k]=true}}
   function ku(e){const k=keymap[e.key];if(k){e.preventDefault();keys[k]=false}}
   function blur(){Object.keys(keys).forEach(k=>keys[k]=false)}
   window.addEventListener('keydown',kd);window.addEventListener('keyup',ku);window.addEventListener('blur',blur);
@@ -131,32 +131,62 @@ function launchCorsa3D(){
     return new Float32Array([xx,yx,zx,0,0,yy,zy,0,xz,yz,zz,0,-xx*eye[0]-xz*eye[2],-yx*eye[0]-yy*eye[1]-yz*eye[2],-zx*eye[0]-zy*eye[1]-zz*eye[2],1]);
   }
   function mul(a,b){const o=new Float32Array(16);for(let j=0;j<4;j++)for(let i=0;i<4;i++)for(let k=0;k<4;k++)o[i+j*4]+=a[i+k*4]*b[k+j*4];return o}
-  let t=.12,lateral=0,speed=0,lap=1,lapTime=0,best=Infinity,completed=false,prev=performance.now(),steer=0;
+  let t=.12,speed=0,lap=1,lapTime=0,best=Infinity,completed=false,prev=performance.now(),steer=0;
+  let spawn=track(t),carX=spawn.x,carZ=spawn.z,heading=Math.atan2(spawn.tx,spawn.tz),lastTrackT=t;
+  // World-space vehicle movement: no automatic attachment to the circuit.
+  function nearestTrack(x,z){
+    let a=Math.atan2(z/rz,x/rx);
+    let u=(a/(Math.PI*2)+1)%1;
+    // Refine nearest point on elliptical track, not just angular projection.
+    for(let i=0;i<5;i++){
+      const q=track(u),dx=-rx*Math.sin(u*2*Math.PI),dz=rz*Math.cos(u*2*Math.PI);
+      const ddx=-rx*Math.cos(u*2*Math.PI),ddz=-rz*Math.sin(u*2*Math.PI);
+      const ex=q.x-x,ez=q.z-z;
+      const step=(ex*dx+ez*dz)/(dx*dx+dz*dz+ex*ddx+ez*ddz);
+      u=(u-step/(2*Math.PI)+1)%1;
+    }
+    const q=track(u);
+    return {u,q,distance:Math.hypot(x-q.x,z-q.z)};
+  }
+  function resetCar(){
+    const q=track(.12);carX=q.x;carZ=q.z;heading=Math.atan2(q.tx,q.tz);
+    t=.12;lastTrackT=t;speed=0;steer=0;lap=1;lapTime=0;completed=false;
+    Object.keys(keys).forEach(k=>keys[k]=false);
+  }
+  overlay.querySelector('#corsaReset').onclick=resetCar;
   const speedEl=overlay.querySelector('#corsaSpeed'),lapEl=overlay.querySelector('#corsaLap'),bestEl=overlay.querySelector('#corsaBest');
   function render(now){
     if(!live)return;
     const dt=Math.min(.04,Math.max(0,(now-prev)/1000));prev=now;
     const wheel=(keys.right?1:0)-(keys.left?1:0);
     steer+=(wheel-steer)*Math.min(1,dt*8);
+    const nearest=nearestTrack(carX,carZ);
+    const offroad=nearest.distance>roadWidth/2-1;
     if(!completed){
-      const offroad=Math.abs(lateral)>roadWidth/2-1.0;
-      const accel=keys.brake?-60:keys.gas?(offroad?10:26):-12;
-      speed=Math.max(0,Math.min(offroad?75:185,speed+accel*dt));
-      lateral+=steer*(2.0+speed*.052)*dt;
-      // Off-track grip loss and drag: arcade handling, not a physical tire simulation.
-      if(offroad)speed=Math.max(0,speed-17*dt);
-      lateral=Math.max(-25,Math.min(25,lateral));
-      const p=track(t),curvature=Math.hypot(-rx*Math.cos(t*6.283),-rz*Math.sin(t*6.283))/Math.pow(Math.hypot(-rx*Math.sin(t*6.283),rz*Math.cos(t*6.283)),2);
-      lateral+=Math.sign(steer||1)*0; // wheel steering controls lateral offset from racing line
-      const perimeter=505;
-      t+=speed/3.6*dt/perimeter;
-      if(t>=1){t-=1;best=Math.min(best,lapTime);lapTime=0;lap++;if(lap>3){completed=true;speed=0}}
+      const accel=keys.brake?-65:keys.gas?(offroad?11:29):-11;
+      speed=Math.max(0,Math.min(offroad?80:190,speed+accel*dt));
+      if(offroad)speed=Math.max(0,speed-19*dt);
+      // Positive steering is right: yaw increases clockwise when viewed from above.
+      // Heading stays unchanged if the driver releases the wheel; car continues straight.
+      const turnRate=(speed/3.6)/10.5;
+      heading+=steer*turnRate*dt*(offroad?.65:1);
+      carX+=Math.sin(heading)*(speed/3.6)*dt;
+      carZ+=Math.cos(heading)*(speed/3.6)*dt;
       lapTime+=dt;
+      const curr=nearestTrack(carX,carZ);
+      let delta=curr.u-lastTrackT;
+      if(delta<-.5)delta+=1;
+      if(delta>.5)delta-=1;
+      // Only count forward finish-line crossings while on track.
+      if(lastTrackT>.85&&curr.u<.15&&delta>0&&curr.distance<roadWidth/2+2){
+        best=Math.min(best,lapTime);lapTime=0;lap++;if(lap>3){completed=true;speed=0}
+      }
+      lastTrackT=curr.u;
+      t=curr.u;
     }
-    const p=track(t),px=p.x+p.nx*lateral,pz=p.z+p.nz*lateral;
-    const heading=Math.atan2(p.tx,p.tz)-steer*.10;
-    const camera=cameraMode===0?[px-p.tx*10+p.nx*1.0,5.6,pz-p.tz*10+p.nz*1.0]:cameraMode===1?[px+p.tx*.8,1.65,pz+p.tz*.8]:[px-p.tx*19,11,pz-p.tz*19];
-    const target=cameraMode===2?[px+p.tx*11,1.0,pz+p.tz*11]:[px+p.tx*18,1.5,pz+p.tz*18];
+    const px=carX,pz=carZ,fx=Math.sin(heading),fz=Math.cos(heading),nx=fz,nz=-fx;
+    const camera=cameraMode===0?[px-fx*10+nx*1.0,5.6,pz-fz*10+nz*1.0]:cameraMode===1?[px+fx*.8,1.65,pz+fz*.8]:[px-fx*19,11,pz-fz*19];
+    const target=cameraMode===2?[px+fx*11,1.0,pz+fz*11]:[px+fx*18,1.5,pz+fz*18];
     const ratio=window.devicePixelRatio||1;
     const dw=Math.max(2,Math.round(canvas.clientWidth*Math.min(1.6,ratio))),dh=Math.max(2,Math.round(canvas.clientHeight*Math.min(1.6,ratio)));
     if(canvas.width!==dw||canvas.height!==dh){canvas.width=dw;canvas.height=dh}
